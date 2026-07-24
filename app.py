@@ -1,6 +1,7 @@
 from datetime import datetime
 import io
 import openpyxl
+from openpyxl.drawing.image import Image as OpenpyxlImage
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 import pandas as pd
@@ -12,8 +13,7 @@ st.set_page_config(
 )
 
 # Estilo visual corporativo SONAMEX
-PRIMARY_COLOR = "#00512D"  # Verde institucional aproximado
-SECONDARY_COLOR = "#F4F6F4"
+PRIMARY_COLOR = "#00512D"
 
 st.markdown(
     f"""
@@ -36,14 +36,17 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# Mostrar Logo en la Barra Lateral o Encabezado si existe el archivo
+try:
+    st.sidebar.image("logo_sonamex.png", width=180)
+except Exception:
+    st.sidebar.markdown("### SONAMEX")
+
 st.markdown(
     '<div class="main-header">📦 Sistema de Control y Medición de Entregas - SONAMEX</div>',
     unsafe_allow_html=True,
 )
 
-
-# Simulación de Base de Datos en Memoria o Conexión (Para este ejemplo usamos st.session_state)
-# En producción, esto se conecta fácilmente a Google Sheets mediante gspread o st.connection.
 if "db_entregas" not in st.session_state:
     st.session_state.db_entregas = pd.DataFrame(
         columns=[
@@ -59,7 +62,6 @@ if "db_entregas" not in st.session_state:
         ]
     )
 
-# Menú de Navegación por Roles
 menu = st.sidebar.selectbox(
     "Selecciona el Módulo",
     ["1. Oficina (Alta de Envíos)", "2. Campo (Repartidores)", "3. Reportes"],
@@ -68,12 +70,12 @@ menu = st.sidebar.selectbox(
 df = st.session_state.db_entregas
 
 # ==========================================
-# MÓDULO 1: OFICINA (Alta de Envíos / Layout)
+# MÓDULO 1: OFICINA
 # ==========================================
 if menu == "1. Oficina (Alta de Envíos)":
     st.subheader("🏢 Módulo de Atención a Clientes / Oficina")
     st.write(
-        "Ingresa los datos del cliente y la entrega para enviarla a ruta."
+        "Ingresa los datos del cliente y la dirección para enviar a ruta."
     )
 
     with st.form("form_alta"):
@@ -94,7 +96,7 @@ if menu == "1. Oficina (Alta de Envíos)":
                 nuevo_id = len(df) + 1
                 nuevo_registro = {
                     "id": nuevo_id,
-                    "fecha_asig": str(fecha_asig),
+                    "fecha_asignacion": str(fecha_asig),
                     "cliente": cliente,
                     "direccion": direccion,
                     "telefono": telefono,
@@ -107,7 +109,7 @@ if menu == "1. Oficina (Alta de Envíos)":
                     [df, pd.DataFrame([nuevo_registro])], ignore_index=True
                 )
                 st.success(
-                    f"¡Envío para el cliente '{cliente}' registrado correctamente!"
+                    f"¡Envío para el cliente '{cliente}' registrado con éxito!"
                 )
             else:
                 st.error("Por favor completa al menos el nombre y la dirección.")
@@ -120,23 +122,21 @@ if menu == "1. Oficina (Alta de Envíos)":
         st.info("No hay envíos registrados todavía.")
 
 # ==========================================
-# MÓDULO 2: CAMPO (Vista de Repartidores)
+# MÓDULO 2: CAMPO (Repartidores)
 # ==========================================
 elif menu == "2. Campo (Repartidores)":
     st.subheader("📱 Módulo de Reparto en Campo")
-    st.write("Selecciona tu entrega pendiente para actualizar su estatus.")
+    st.write("Selecciona la entrega pendiente para actualizar su estatus.")
 
     if df.empty or len(df[df["estatus_entrega"] == "Pendiente"]) == 0:
         st.info("No hay entregas pendientes por actualizar en este momento.")
     else:
         pendientes = df[df["estatus_entrega"] == "Pendiente"]
-        # Selector de cliente pendiente
         cliente_seleccionado = st.selectbox(
             "Selecciona el Cliente a actualizar:",
             options=pendientes["cliente"].tolist(),
         )
 
-        # Filtrar el registro actual
         registro_idx = df[df["cliente"] == cliente_seleccionado].index[0]
         row = df.loc[registro_idx]
 
@@ -163,9 +163,8 @@ elif menu == "2. Campo (Repartidores)":
                 )
 
             comentarios = st.text_area(
-                "Comentarios adicionales (Ej. Pide entregar por la tarde, regresa a las 3 pm)"
+                "Comentarios adicionales (Ej. Pide entregar por la tarde)"
             )
-
             submit_campo = st.form_submit_button("Guardar Estatus de Entrega")
 
             if submit_campo:
@@ -179,13 +178,11 @@ elif menu == "2. Campo (Repartidores)":
                 st.session_state.db_entregas.at[
                     registro_idx, "fecha_actualizacion"
                 ] = str(datetime.now())
-                st.success(
-                    "¡Información de campo actualizada con éxito! Buen trabajo."
-                )
+                st.success("¡Estatus de entrega actualizado correctamente!")
                 st.rerun()
 
 # ==========================================
-# MÓDULO 3: REPORTES (Excel con estilo Sonamex)
+# MÓDULO 3: REPORTES
 # ==========================================
 elif menu == "3. Reportes":
     st.subheader("📊 Módulo de Reportería y Exportación")
@@ -202,15 +199,20 @@ elif menu == "3. Reportes":
         with col_f2:
             f_fin = st.date_input("Fecha Final", value=datetime.today())
 
-        if st.button("📥 Generar Reporte Excel con Estilo SONAMEX"):
-            # Filtrado por fecha (simulado en base a la fecha de asignación)
-            df_filtrado = df.copy()
-
-            # Creación del archivo Excel usando OpenPyXL para dar formato institucional
+        if st.button("📥 Generar Reporte Excel con Logo y Estilos SONAMEX"):
             output = io.BytesIO()
             wb = openpyxl.Workbook()
             ws = wb.active
             ws.title = "Reporte de Entregas"
+
+            # Intentar insertar el logotipo institucional en el Excel
+            try:
+                img = OpenpyxlImage("logo_sonamex.png")
+                img.width = 140
+                img.height = 45
+                ws.add_image(img, "B2")
+            except Exception:
+                pass
 
             # Estilos institucionales
             header_fill = PatternFill(
@@ -226,16 +228,18 @@ elif menu == "3. Reportes":
                 bottom=Side(style="thin", color="CCCCCC"),
             )
 
-            # Título del Reporte
+            # Espacios y título estructurado
+            ws.append([])
+            ws.append([])
+            ws.append([])
             ws.append(["REPORTE DE ENTREGAS - SONAMEX S.A. DE C.V."])
             ws.append(
                 [
-                    f"Generado del {f_inicio} al {f_fin} | Fecha de emisión: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+                    f"Período: {f_inicio} al {f_fin} | Emitido: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
                 ]
             )
-            ws.append([])  # Espacio
+            ws.append([])
 
-            # Encabezados de tabla
             headers = [
                 "ID",
                 "Fecha Asignación",
@@ -249,17 +253,16 @@ elif menu == "3. Reportes":
             ]
             ws.append(headers)
 
-            # Dar estilo a la cabecera de la tabla (Fila 4)
+            header_row_idx = ws.max_row
             for col_num in range(1, len(headers) + 1):
-                cell = ws.cell(row=4, column=col_num)
+                cell = ws.cell(row=header_row_idx, column=col_num)
                 cell.fill = header_fill
                 cell.font = header_font
                 cell.alignment = Alignment(
                     horizontal="center", vertical="center"
                 )
 
-            # Agregar datos
-            for row_idx, row in df_filtrado.iterrows():
+            for row_idx, row in df.iterrows():
                 ws.append(list(row))
                 current_row = ws.max_row
                 for col_num in range(1, len(headers) + 1):
@@ -269,7 +272,6 @@ elif menu == "3. Reportes":
                         horizontal="left", vertical="center"
                     )
 
-            # Autoajustar anchos de columna
             for col in ws.columns:
                 max_len = max(len(str(cell.value or "")) for cell in col)
                 col_letter = get_column_letter(col[0].column)
@@ -284,4 +286,4 @@ elif menu == "3. Reportes":
                 file_name=f"Reporte_Entregas_Sonamex_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
-            st.success("¡Reporte listo para descargar con éxito!")
+            st.success("¡Reporte con branding de Sonamex generado con éxito!")
