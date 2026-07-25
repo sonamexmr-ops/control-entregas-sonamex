@@ -89,7 +89,7 @@ def guardar_datos_sheets(df):
 
 df = cargar_datos_sheets()
 
-# Control de Sesión de Usuario (3 perfiles)
+# Control de Sesión de Usuario (Usuarios y Contraseñas Actualizados)
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
     st.session_state.usuario = ""
@@ -113,6 +113,7 @@ if not st.session_state.autenticado:
             submit_login = st.form_submit_button("Entrar al Sistema")
 
             if submit_login:
+                # Diccionario centralizado de usuarios y contraseñas válidos
                 usuarios_validos = {
                     "admin": {
                         "pass": "master2026",
