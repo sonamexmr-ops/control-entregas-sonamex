@@ -36,17 +36,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Mostrar Logo en la Barra Lateral o Encabezado si existe el archivo
-try:
-    st.sidebar.image("logo_sonamex.png", width=180)
-except Exception:
-    st.sidebar.markdown("### SONAMEX")
-
-st.markdown(
-    '<div class="main-header">📦 Sistema de Control y Medición de Entregas - SONAMEX</div>',
-    unsafe_allow_html=True,
-)
-
+# Base de datos simulada en memoria
 if "db_entregas" not in st.session_state:
     st.session_state.db_entregas = pd.DataFrame(
         columns=[
@@ -62,12 +52,94 @@ if "db_entregas" not in st.session_state:
         ]
     )
 
-menu = st.sidebar.selectbox(
-    "Selecciona el Módulo",
-    ["1. Oficina (Alta de Envíos)", "2. Campo (Repartidores)", "3. Reportes"],
-)
+# Control de Sesión de Usuario
+if "autenticado" not in st.session_state:
+    st.session_state.autenticado = False
+    st.session_state.usuario = ""
+    st.session_state.rol = ""
+
+# Pantalla de Login si no ha iniciado sesión
+if not st.session_state.autenticado:
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        try:
+            st.image("logo_sonamex.png", width=220)
+        except Exception:
+            pass
+        st.markdown(
+            '<div class="main-header">🔐 Iniciar Sesión - SONAMEX</div>',
+            unsafe_allow_html=True,
+        )
+
+        with st.form("login_form"):
+            user_input = st.text_input("Usuario")
+            pass_input = st.text_input("Contraseña", type="password")
+            submit_login = st.form_submit_button("Entrar al Sistema")
+
+            if submit_login:
+                # Base de datos interna de usuarios y permisos
+                usuarios_validos = {
+                    "oficina1": {
+                        "pass": "sonamex2026",
+                        "rol": "Oficina",
+                        "nombre": "Personal de Oficina",
+                    },
+                    "repartor1": {
+                        "pass": "ruta123",
+                        "rol": "Campo",
+                        "nombre": "Repartidor en Ruta",
+                    },
+                }
+
+                if (
+                    user_input in usuarios_validos
+                    and usuarios_validos[user_input]["pass"] == pass_input
+                ):
+                    st.session_state.autenticado = True
+                    st.session_state.usuario = usuarios_validos[user_input][
+                        "nombre"
+                    ]
+                    st.session_state.rol = usuarios_validos[user_input]["rol"]
+                    st.success("¡Bienvenido! Cargando sistema...")
+                    st.rerun()
+                else:
+                    st.error("Usuario o contraseña incorrectos.")
+    st.stop()
+
+# --- A PARTIR DE AQUÍ EL USUARIO YA ESTÁ LOGUEADO ---
 
 df = st.session_state.db_entregas
+
+# Mostrar Logo y Datos del Usuario en el Barra Lateral
+try:
+    st.sidebar.image("logo_sonamex.png", width=180)
+except Exception:
+    st.sidebar.markdown("### SONAMEX")
+
+st.sidebar.markdown(f"👤 **Usuario:** {st.session_state.usuario}")
+st.sidebar.markdown(f"🏷️ **Perfil:** {st.session_state.rol}")
+
+if st.sidebar.button("Cerrar Sesión"):
+    st.session_state.autenticado = False
+    st.rerun()
+
+st.markdown(
+    '<div class="main-header">📦 Sistema de Control y Medición de Entregas - SONAMEX</div>',
+    unsafe_allow_html=True,
+)
+
+# Definir módulos según el rol del usuario
+if st.session_state.rol == "Oficina":
+    menu = st.sidebar.selectbox(
+        "Selecciona el Módulo",
+        ["1. Oficina (Alta de Envíos)", "2. Campo (Repartidores)", "3. Reportes"],
+    )
+else:
+    # Si es de campo, solo ve el módulo de repartidores por seguridad
+    menu = "2. Campo (Repartidores)"
+    st.sidebar.info(
+        "Modo Repartidor activo: Solo visualizas el módulo de campo."
+    )
 
 # ==========================================
 # MÓDULO 1: OFICINA
@@ -205,7 +277,6 @@ elif menu == "3. Reportes":
             ws = wb.active
             ws.title = "Reporte de Entregas"
 
-            # Intentar insertar el logotipo institucional en el Excel
             try:
                 img = OpenpyxlImage("logo_sonamex.png")
                 img.width = 140
@@ -214,7 +285,6 @@ elif menu == "3. Reportes":
             except Exception:
                 pass
 
-            # Estilos institucionales
             header_fill = PatternFill(
                 start_color="00512D", end_color="00512D", fill_type="solid"
             )
@@ -228,7 +298,6 @@ elif menu == "3. Reportes":
                 bottom=Side(style="thin", color="CCCCCC"),
             )
 
-            # Espacios y título estructurado
             ws.append([])
             ws.append([])
             ws.append([])
