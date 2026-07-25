@@ -472,7 +472,8 @@ elif menu == "3. Reportes":
                     )
                     pdf.ln()
 
-                pdf_output = pdf.output(dest="S").encode("latin1")
+                # Corrección aplicada aquí para fpdf2 actual:
+                pdf_output = bytes(pdf.output())
 
                 st.download_button(
                     label="⬇️ Descargar Archivo PDF",
