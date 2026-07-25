@@ -59,7 +59,7 @@ if "autenticado" not in st.session_state:
     st.session_state.usuario = ""
     st.session_state.rol = ""
 
-# Pantalla de Login
+# Pantalla de Login con los 3 usuarios requeridos
 if not st.session_state.autenticado:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
@@ -79,15 +79,20 @@ if not st.session_state.autenticado:
 
             if submit_login:
                 usuarios_validos = {
+                    "admin": {
+                        "pass": "master2026",
+                        "rol": "Oficina",
+                        "nombre": "Admin Máster",
+                    },
                     "oficina1": {
                         "pass": "sonamex2026",
                         "rol": "Oficina",
-                        "nombre": "Personal de Oficina",
+                        "nombre": "Admin 1",
                     },
                     "repartor1": {
                         "pass": "ruta123",
                         "rol": "Campo",
-                        "nombre": "Repartidor en Ruta",
+                        "nombre": "Personal de Entregas",
                     },
                 }
 
@@ -134,7 +139,7 @@ if st.session_state.rol == "Oficina":
 else:
     menu = "2. Campo (Repartidores)"
     st.sidebar.info(
-        "Modo Repartidor activo: Solo visualizas el módulo de campo."
+        "Modo Entregas activo: Solo visualizas el módulo de campo."
     )
 
 # ==========================================
@@ -250,24 +255,31 @@ elif menu == "2. Campo (Repartidores)":
                 st.rerun()
 
 # ==========================================
-# MÓDULO 3: REPORTES (Excel / PDF por Fechas)
+# MÓDULO 3: REPORTES
 # ==========================================
 elif menu == "3. Reportes":
     st.subheader("📊 Módulo de Reportería y Exportación por Fechas")
     st.write(
-        "Selecciona el rango de fechas para extraer y exportar el reporte."
+        "Elige el rango de fechas directamente en los calendarios para extraer el reporte:"
     )
 
     if df.empty:
-        st.warning("No hay datos disponibles para generar reportes.")
+        st.warning(
+            "No hay datos registrados en el sistema para generar reportes."
+        )
     else:
+        # Selectores de fecha visibles y directos
         col_f1, col_f2 = st.columns(2)
         with col_f1:
-            f_inicio = st.date_input("Fecha Inicial", value=datetime.today())
+            f_inicio = st.date_input(
+                "📅 Fecha Inicial del Reporte", value=datetime.today()
+            )
         with col_f2:
-            f_fin = st.date_input("Fecha Final", value=datetime.today())
+            f_fin = st.date_input(
+                "📅 Fecha Final del Reporte", value=datetime.today()
+            )
 
-        # Filtrar datos por fecha seleccionada
+        # Filtrar datos de forma segura
         df["fecha_dt"] = pd.to_datetime(
             df["fecha_asignacion"]
         ).dt.date
@@ -276,7 +288,7 @@ elif menu == "3. Reportes":
         ].drop(columns=["fecha_dt"])
 
         st.info(
-            f"Se encontraron **{len(df_filtrado)}** registros para el rango seleccionado."
+            f"Se encontraron **{len(df_filtrado)}** registros entre el {f_inicio} y el {f_fin}."
         )
 
         tipo_exportacion = st.radio(
@@ -378,7 +390,7 @@ elif menu == "3. Reportes":
                 pdf.add_page()
 
                 # Cabecera PDF con colores Sonamex
-                pdf.set_fill_color(0, 81, 45)  # Verde Sonamex
+                pdf.set_fill_color(0, 81, 45)
                 pdf.rect(0, 0, 297, 20, "F")
 
                 pdf.set_font("Arial", "B", 14)
@@ -472,7 +484,6 @@ elif menu == "3. Reportes":
                     )
                     pdf.ln()
 
-                # Corrección aplicada aquí para fpdf2 actual:
                 pdf_output = bytes(pdf.output())
 
                 st.download_button(
