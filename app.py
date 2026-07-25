@@ -6,6 +6,7 @@ from openpyxl.drawing.image import Image as OpenpyxlImage
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 import pandas as pd
+import requests
 import streamlit as st
 
 # Configuración de página
@@ -37,29 +38,63 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Base de datos simulada en memoria
-if "db_entregas" not in st.session_state:
-    st.session_state.db_entregas = pd.DataFrame(
-        columns=[
-            "id",
-            "fecha_asignacion",
-            "cliente",
-            "direccion",
-            "telefono",
-            "estatus_entrega",
-            "motivo",
-            "comentarios",
-            "fecha_actualizacion",
-        ]
-    )
+# URL de tu Web App de Google Apps Script (Conectada a tu Google Sheets)
+WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxe-Uz2ZLGYTqP0gH0ByMOIWyrr3LAmKetdZVNyx_xC7sA-H4wtLLGk6l1izJsy_Sswew/exec"
 
-# Control de Sesión de Usuario
+
+@st.cache_data(ttl=2)
+def cargar_datos_sheets():
+    try:
+        response = requests.get(WEBHOOK_URL)
+        if response.status_code == 200:
+            data = response.json()
+            if data:
+                return pd.DataFrame(data)
+        return pd.DataFrame(
+            columns=[
+                "id",
+                "fecha_asignacion",
+                "cliente",
+                "direccion",
+                "telefono",
+                "estatus_entrega",
+                "motivo",
+                "comentarios",
+                "fecha_actualizacion",
+            ]
+        )
+    except Exception:
+        return pd.DataFrame(
+            columns=[
+                "id",
+                "fecha_asignacion",
+                "cliente",
+                "direccion",
+                "telefono",
+                "estatus_entrega",
+                "motivo",
+                "comentarios",
+                "fecha_actualizacion",
+            ]
+        )
+
+
+def guardar_datos_sheets(df):
+    try:
+        data_dict = df.to_dict(orient="records")
+        requests.post(WEBHOOK_URL, json=data_dict)
+    except Exception:
+        pass
+
+
+df = cargar_datos_sheets()
+
+# Control de Sesión de Usuario (3 perfiles)
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
     st.session_state.usuario = ""
     st.session_state.rol = ""
 
-# Pantalla de Login con los 3 usuarios requeridos
 if not st.session_state.autenticado:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
@@ -112,8 +147,6 @@ if not st.session_state.autenticado:
     st.stop()
 
 # --- SESIÓN ACTIVA ---
-df = st.session_state.db_entregas
-
 try:
     st.sidebar.image("logo_sonamex.png", width=180)
 except Exception:
@@ -166,36 +199,42 @@ if menu == "1. Oficina (Alta de Envíos)":
 
         if submit_alta:
             if cliente and direccion:
-                nuevo_id = len(df) + 1
-                nuevo_registro = {
-                    "id": nuevo_id,
-                    "fecha_asignacion": str(fecha_asig),
-                    "cliente": cliente,
-                    "direccion": direccion,
-                    "telefono": telefono,
-                    "estatus_entrega": "Pendiente",
-                    "motivo": "",
-                    "comentarios": "",
-                    "fecha_actualizacion": "",
-                }
-                st.session_state.db_entregas = pd.concat(
-                    [df, pd.DataFrame([nuevo_registro])], ignore_index=True
+                nuevo_id = int(len(df) + 1)
+                nuevo_registro = pd.DataFrame(
+                    [
+                        {
+                            "id": nuevo_id,
+                            "fecha_asignacion": str(fecha_asig),
+                            "cliente": cliente,
+                            "direccion": direccion,
+                            "telefono": str(telefono),
+                            "estatus_entrega": "Pendiente",
+                            "motivo": "",
+                            "comentarios": "",
+                            "fecha_actualizacion": "",
+                        }
+                    ]
                 )
+
+                df_updated = pd.concat([df, nuevo_registro], ignore_index=True)
+                guardar_datos_sheets(df_updated)
+                st.cache_data.clear()
                 st.success(
-                    f"¡Envío para el cliente '{cliente}' registrado con éxito!"
+                    f"¡Envío para el cliente '{cliente}' registrado y guardado en Google Sheets con éxito!"
                 )
+                st.rerun()
             else:
                 st.error("Por favor completa al menos el nombre y la dirección.")
 
     st.markdown("---")
-    st.subheader("📋 Envíos Actuales en Sistema")
+    st.subheader("📋 Envíos Actuales en Sistema (Google Sheets)")
     if not df.empty:
         st.dataframe(df, use_container_width=True)
     else:
         st.info("No hay envíos registrados todavía.")
 
 # ==========================================
-# MÓDULO 2: CAMPO (Repartidores)
+# MÓDULO 2: CAMPO (Repartidores - Con Opción Reprogramado)
 # ==========================================
 elif menu == "2. Campo (Repartidores)":
     st.subheader("📱 Módulo de Reparto en Campo")
@@ -218,8 +257,8 @@ elif menu == "2. Campo (Repartidores)":
 
         with st.form("form_campo"):
             estatus = st.radio(
-                "¿Se entregó el producto?",
-                ["Entregado con éxito", "No se entregó"],
+                "¿Cuál es el estatus de la entrega?",
+                ["Entregado con éxito", "No se entregó", "Reprogramado"],
             )
 
             motivo = ""
@@ -230,28 +269,33 @@ elif menu == "2. Campo (Repartidores)":
                         "Cliente ausente",
                         "Negocio cerrado",
                         "Dirección incorrecta",
-                        "Reprogramado por cliente",
                         "Otro",
                     ],
                 )
+            elif estatus == "Reprogramado":
+                nueva_fecha = st.date_input(
+                    "Nueva fecha programada para entrega"
+                )
+                motivo = f"Reprogramado para el {nueva_fecha}"
 
             comentarios = st.text_area(
-                "Comentarios adicionales (Ej. Pide entregar por la tarde)"
+                "Comentarios adicionales (Ej. Pide entregar por la tarde, etc.)"
             )
             submit_campo = st.form_submit_button("Guardar Estatus de Entrega")
 
             if submit_campo:
-                st.session_state.db_entregas.at[
-                    registro_idx, "estatus_entrega"
-                ] = estatus
-                st.session_state.db_entregas.at[registro_idx, "motivo"] = motivo
-                st.session_state.db_entregas.at[
-                    registro_idx, "comentarios"
-                ] = comentarios
-                st.session_state.db_entregas.at[
-                    registro_idx, "fecha_actualizacion"
-                ] = str(datetime.now())
-                st.success("¡Estatus de entrega actualizado correctamente!")
+                df.at[registro_idx, "estatus_entrega"] = estatus
+                df.at[registro_idx, "motivo"] = motivo
+                df.at[registro_idx, "comentarios"] = comentarios
+                df.at[registro_idx, "fecha_actualizacion"] = str(
+                    datetime.now()
+                )
+
+                guardar_datos_sheets(df)
+                st.cache_data.clear()
+                st.success(
+                    "¡Estatus de entrega actualizado y guardado en Google Sheets!"
+                )
                 st.rerun()
 
 # ==========================================
@@ -268,7 +312,6 @@ elif menu == "3. Reportes":
             "No hay datos registrados en el sistema para generar reportes."
         )
     else:
-        # Selectores de fecha visibles y directos
         col_f1, col_f2 = st.columns(2)
         with col_f1:
             f_inicio = st.date_input(
@@ -279,7 +322,6 @@ elif menu == "3. Reportes":
                 "📅 Fecha Final del Reporte", value=datetime.today()
             )
 
-        # Filtrar datos de forma segura
         df["fecha_dt"] = pd.to_datetime(
             df["fecha_asignacion"]
         ).dt.date
@@ -389,7 +431,6 @@ elif menu == "3. Reportes":
                 pdf = FPDF(orientation="L", unit="mm", format="A4")
                 pdf.add_page()
 
-                # Cabecera PDF con colores Sonamex
                 pdf.set_fill_color(0, 81, 45)
                 pdf.rect(0, 0, 297, 20, "F")
 
@@ -419,7 +460,6 @@ elif menu == "3. Reportes":
 
                 pdf.ln(5)
 
-                # Tabla PDF
                 pdf.set_font("Arial", "B", 8)
                 pdf.set_fill_color(230, 235, 230)
                 headers = [
