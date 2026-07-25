@@ -1,5 +1,6 @@
 from datetime import datetime
 import io
+from fpdf import FPDF
 import openpyxl
 from openpyxl.drawing.image import Image as OpenpyxlImage
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -58,7 +59,7 @@ if "autenticado" not in st.session_state:
     st.session_state.usuario = ""
     st.session_state.rol = ""
 
-# Pantalla de Login si no ha iniciado sesión
+# Pantalla de Login
 if not st.session_state.autenticado:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
@@ -77,7 +78,6 @@ if not st.session_state.autenticado:
             submit_login = st.form_submit_button("Entrar al Sistema")
 
             if submit_login:
-                # Base de datos interna de usuarios y permisos
                 usuarios_validos = {
                     "oficina1": {
                         "pass": "sonamex2026",
@@ -106,11 +106,9 @@ if not st.session_state.autenticado:
                     st.error("Usuario o contraseña incorrectos.")
     st.stop()
 
-# --- A PARTIR DE AQUÍ EL USUARIO YA ESTÁ LOGUEADO ---
-
+# --- SESIÓN ACTIVA ---
 df = st.session_state.db_entregas
 
-# Mostrar Logo y Datos del Usuario en el Barra Lateral
 try:
     st.sidebar.image("logo_sonamex.png", width=180)
 except Exception:
@@ -128,14 +126,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Definir módulos según el rol del usuario
 if st.session_state.rol == "Oficina":
     menu = st.sidebar.selectbox(
         "Selecciona el Módulo",
         ["1. Oficina (Alta de Envíos)", "2. Campo (Repartidores)", "3. Reportes"],
     )
 else:
-    # Si es de campo, solo ve el módulo de repartidores por seguridad
     menu = "2. Campo (Repartidores)"
     st.sidebar.info(
         "Modo Repartidor activo: Solo visualizas el módulo de campo."
@@ -254,12 +250,12 @@ elif menu == "2. Campo (Repartidores)":
                 st.rerun()
 
 # ==========================================
-# MÓDULO 3: REPORTES
+# MÓDULO 3: REPORTES (Excel / PDF por Fechas)
 # ==========================================
 elif menu == "3. Reportes":
-    st.subheader("📊 Módulo de Reportería y Exportación")
+    st.subheader("📊 Módulo de Reportería y Exportación por Fechas")
     st.write(
-        "Selecciona el rango de fechas para generar el reporte descargable en Excel."
+        "Selecciona el rango de fechas para extraer y exportar el reporte."
     )
 
     if df.empty:
@@ -271,88 +267,217 @@ elif menu == "3. Reportes":
         with col_f2:
             f_fin = st.date_input("Fecha Final", value=datetime.today())
 
-        if st.button("📥 Generar Reporte Excel con Logo y Estilos SONAMEX"):
-            output = io.BytesIO()
-            wb = openpyxl.Workbook()
-            ws = wb.active
-            ws.title = "Reporte de Entregas"
+        # Filtrar datos por fecha seleccionada
+        df["fecha_dt"] = pd.to_datetime(
+            df["fecha_asignacion"]
+        ).dt.date
+        df_filtrado = df[
+            (df["fecha_dt"] >= f_inicio) & (df["fecha_dt"] <= f_fin)
+        ].drop(columns=["fecha_dt"])
 
-            try:
-                img = OpenpyxlImage("logo_sonamex.png")
-                img.width = 140
-                img.height = 45
-                ws.add_image(img, "B2")
-            except Exception:
-                pass
+        st.info(
+            f"Se encontraron **{len(df_filtrado)}** registros para el rango seleccionado."
+        )
 
-            header_fill = PatternFill(
-                start_color="00512D", end_color="00512D", fill_type="solid"
-            )
-            header_font = Font(
-                name="Calibri", size=11, bold=True, color="FFFFFF"
-            )
-            border_thin = Border(
-                left=Side(style="thin", color="CCCCCC"),
-                right=Side(style="thin", color="CCCCCC"),
-                top=Side(style="thin", color="CCCCCC"),
-                bottom=Side(style="thin", color="CCCCCC"),
-            )
+        tipo_exportacion = st.radio(
+            "Selecciona el formato de exportación:", ["Excel (.xlsx)", "PDF"]
+        )
 
-            ws.append([])
-            ws.append([])
-            ws.append([])
-            ws.append(["REPORTE DE ENTREGAS - SONAMEX S.A. DE C.V."])
-            ws.append(
-                [
-                    f"Período: {f_inicio} al {f_fin} | Emitido: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-                ]
-            )
-            ws.append([])
+        if tipo_exportacion == "Excel (.xlsx)":
+            if st.button("📥 Generar y Descargar Reporte en EXCEL"):
+                output = io.BytesIO()
+                wb = openpyxl.Workbook()
+                ws = wb.active
+                ws.title = "Reporte de Entregas"
 
-            headers = [
-                "ID",
-                "Fecha Asignación",
-                "Cliente",
-                "Dirección",
-                "Teléfono",
-                "Estatus",
-                "Motivo",
-                "Comentarios",
-                "Última Actualización",
-            ]
-            ws.append(headers)
+                try:
+                    img = OpenpyxlImage("logo_sonamex.png")
+                    img.width = 140
+                    img.height = 45
+                    ws.add_image(img, "B2")
+                except Exception:
+                    pass
 
-            header_row_idx = ws.max_row
-            for col_num in range(1, len(headers) + 1):
-                cell = ws.cell(row=header_row_idx, column=col_num)
-                cell.fill = header_fill
-                cell.font = header_font
-                cell.alignment = Alignment(
-                    horizontal="center", vertical="center"
+                header_fill = PatternFill(
+                    start_color="00512D", end_color="00512D", fill_type="solid"
+                )
+                header_font = Font(
+                    name="Calibri", size=11, bold=True, color="FFFFFF"
+                )
+                border_thin = Border(
+                    left=Side(style="thin", color="CCCCCC"),
+                    right=Side(style="thin", color="CCCCCC"),
+                    top=Side(style="thin", color="CCCCCC"),
+                    bottom=Side(style="thin", color="CCCCCC"),
                 )
 
-            for row_idx, row in df.iterrows():
-                ws.append(list(row))
-                current_row = ws.max_row
+                ws.append([])
+                ws.append([])
+                ws.append([])
+                ws.append(["REPORTE DE ENTREGAS - SONAMEX S.A. DE C.V."])
+                ws.append(
+                    [
+                        f"Período: {f_inicio} al {f_fin} | Emitido: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+                    ]
+                )
+                ws.append([])
+
+                headers = [
+                    "ID",
+                    "Fecha Asignación",
+                    "Cliente",
+                    "Dirección",
+                    "Teléfono",
+                    "Estatus",
+                    "Motivo",
+                    "Comentarios",
+                    "Última Actualización",
+                ]
+                ws.append(headers)
+
+                header_row_idx = ws.max_row
                 for col_num in range(1, len(headers) + 1):
-                    cell = ws.cell(row=current_row, column=col_num)
-                    cell.border = border_thin
+                    cell = ws.cell(row=header_row_idx, column=col_num)
+                    cell.fill = header_fill
+                    cell.font = header_font
                     cell.alignment = Alignment(
-                        horizontal="left", vertical="center"
+                        horizontal="center", vertical="center"
                     )
 
-            for col in ws.columns:
-                max_len = max(len(str(cell.value or "")) for cell in col)
-                col_letter = get_column_letter(col[0].column)
-                ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
+                for row_idx, row in df_filtrado.iterrows():
+                    ws.append(list(row))
+                    current_row = ws.max_row
+                    for col_num in range(1, len(headers) + 1):
+                        cell = ws.cell(row=current_row, column=col_num)
+                        cell.border = border_thin
+                        cell.alignment = Alignment(
+                            horizontal="left", vertical="center"
+                        )
 
-            wb.save(output)
-            processed_data = output.getvalue()
+                for col in ws.columns:
+                    max_len = max(len(str(cell.value or "")) for cell in col)
+                    col_letter = get_column_letter(col[0].column)
+                    ws.column_dimensions[col_letter].width = max(
+                        max_len + 3, 12
+                    )
 
-            st.download_button(
-                label="⬇️ Descargar Archivo Excel (.xlsx)",
-                data=processed_data,
-                file_name=f"Reporte_Entregas_Sonamex_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
-            st.success("¡Reporte con branding de Sonamex generado con éxito!")
+                wb.save(output)
+                processed_data = output.getvalue()
+
+                st.download_button(
+                    label="⬇️ Descargar Archivo Excel (.xlsx)",
+                    data=processed_data,
+                    file_name=f"Reporte_Entregas_{f_inicio}_al_{f_fin}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+                st.success("¡Reporte en Excel generado con éxito!")
+
+        else:
+            if st.button("📥 Generar y Descargar Reporte en PDF"):
+                pdf = FPDF(orientation="L", unit="mm", format="A4")
+                pdf.add_page()
+
+                # Cabecera PDF con colores Sonamex
+                pdf.set_fill_color(0, 81, 45)  # Verde Sonamex
+                pdf.rect(0, 0, 297, 20, "F")
+
+                pdf.set_font("Arial", "B", 14)
+                pdf.set_text_color(255, 255, 255)
+                pdf.set_xy(10, 5)
+                pdf.cell(
+                    0,
+                    10,
+                    "REPORTE DE ENTREGAS - SONAMEX S.A. DE C.V.",
+                    0,
+                    1,
+                    "L",
+                )
+
+                pdf.set_font("Arial", "", 10)
+                pdf.set_text_color(50, 50, 50)
+                pdf.set_xy(10, 25)
+                pdf.cell(
+                    0,
+                    10,
+                    f"Rango de Fechas: {f_inicio} al {f_fin} | Emitido: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+                    0,
+                    1,
+                    "L",
+                )
+
+                pdf.ln(5)
+
+                # Tabla PDF
+                pdf.set_font("Arial", "B", 8)
+                pdf.set_fill_color(230, 235, 230)
+                headers = [
+                    "ID",
+                    "Fecha",
+                    "Cliente",
+                    "Dirección",
+                    "Teléfono",
+                    "Estatus",
+                    "Motivo",
+                    "Comentarios",
+                ]
+                col_widths = [10, 22, 45, 75, 25, 30, 30, 40]
+
+                for i, header in enumerate(headers):
+                    pdf.cell(
+                        col_widths[i], 8, header, 1, 0, "C", fill=True
+                    )
+                pdf.ln()
+
+                pdf.set_font("Arial", "", 7)
+                for _, row in df_filtrado.iterrows():
+                    pdf.cell(col_widths[0], 7, str(row["id"]), 1, 0, "C")
+                    pdf.cell(
+                        col_widths[1], 7, str(row["fecha_asignacion"]), 1, 0, "C"
+                    )
+                    pdf.cell(
+                        col_widths[2],
+                        7,
+                        str(row["cliente"])[:25],
+                        1,
+                        0,
+                        "L",
+                    )
+                    pdf.cell(
+                        col_widths[3],
+                        7,
+                        str(row["direccion"])[:45],
+                        1,
+                        0,
+                        "L",
+                    )
+                    pdf.cell(
+                        col_widths[4], 7, str(row["telefono"]), 1, 0, "C"
+                    )
+                    pdf.cell(
+                        col_widths[5],
+                        7,
+                        str(row["estatus_entrega"]),
+                        1,
+                        0,
+                        "C",
+                    )
+                    pdf.cell(col_widths[6], 7, str(row["motivo"])[:18], 1, 0, "L")
+                    pdf.cell(
+                        col_widths[7],
+                        7,
+                        str(row["comentarios"])[:25],
+                        1,
+                        0,
+                        "L",
+                    )
+                    pdf.ln()
+
+                pdf_output = pdf.output(dest="S").encode("latin1")
+
+                st.download_button(
+                    label="⬇️ Descargar Archivo PDF",
+                    data=pdf_output,
+                    file_name=f"Reporte_Entregas_{f_inicio}_al_{f_fin}.pdf",
+                    mime="application/pdf",
+                )
+                st.success("¡Reporte en PDF generado con éxito!")
