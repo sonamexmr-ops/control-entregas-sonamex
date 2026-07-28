@@ -206,4 +206,48 @@ elif rol_actual == "Campo":
     if not df.empty and "fecha_asignacion" in df.columns:
         # Filtrar solo pendientes del día actual para el repartidor
         df['solo_fecha'] = pd.to_datetime(df['fecha_asignacion'], errors='coerce').dt.strftime("%Y-%m-%d")
-        df_campo = df[(df['solo_fecha'] == fecha_hoy_str) & (df['estatus_entre
+        df_campo = df[(df['solo_fecha'] == fecha_hoy_str) & (df['estatus_entrega'] == "Pendiente")]
+        
+        if df_campo.empty:
+            st.info("No tienes envíos pendientes asignados para el día de hoy.")
+        else:
+            st.subheader("Seleccione el envío a gestionar:")
+            clientes_pendientes = df_campo['cliente'].tolist()
+            cliente_seleccionado = st.selectbox("Cliente / Dirección", clientes_pendientes)
+            
+            fila_cliente = df_campo[df_campo['cliente'] == cliente_seleccionado].iloc[0]
+            
+            st.markdown("---")
+            st.write(f"**Dirección:** {fila_cliente['direccion']}")
+            st.write(f"**Teléfono:** {fila_cliente['telefono']}")
+            
+            with st.form("form_campo"):
+                estatus = st.selectbox("¿Se entregó?", ["Pendiente", "Entregado con éxito", "No entregado / Reprogramado"])
+                motivo = st.selectbox("Motivo (si aplica)", ["", "Cliente ausente", "Dirección incorrecta", "Negativa de recibir", "Reprogramado por el cliente", "Otro"])
+                comentarios = st.text_area("Comentarios de campo (ej. Pide entregar por la tarde, regreso a las 3 PM)")
+                
+                guardar_entrega = st.form_submit_button("Guardar Estatus de Entrega")
+                
+                if guardar_entrega:
+                    fecha_act = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    
+                    payload = {
+                        "id": str(fila_cliente['id']),
+                        "fecha_asignacion": str(fila_cliente['fecha_asignacion']),
+                        "cliente": str(fila_cliente['cliente']),
+                        "direccion": str(fila_cliente['direccion']),
+                        "telefono": str(fila_cliente['telefono']),
+                        "estatus_entrega": estatus,
+                        "motivo": motivo,
+                        "comentarios": comentarios,
+                        "fecha_actualizacion": fecha_act
+                    }
+                    
+                    if guardar_dato(payload):
+                        st.success("¡Estatus actualizado con éxito en Google Sheets!")
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error("Error al actualizar los datos.")
+    else:
+        st.info("No hay datos cargados en el sistema.")
