@@ -1,536 +1,409 @@
-from datetime import datetime
-import io
-from fpdf import FPDF
-import openpyxl
-from openpyxl.drawing.image import Image as OpenpyxlImage
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
-import pandas as pd
+import datetime
 import requests
 import streamlit as st
+import pandas as pd
+from fpdf import FPDF
 
-# Configuración de página
+# --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(
-    page_title="Control de Entregas - SONAMEX", page_icon="📦", layout="wide"
+    page_title="Control de Entregas - Sonamex", page_icon="📦", layout="wide"
 )
 
-# Estilo visual corporativo SONAMEX
-PRIMARY_COLOR = "#00512D"
-
-st.markdown(
-    f"""
-    <style>
-    .main-header {{
-        font-size: 24px;
-        font-weight: bold;
-        color: {PRIMARY_COLOR};
-        text-align: center;
-        margin-bottom: 20px;
-    }}
-    .stButton>button {{
-        background-color: {PRIMARY_COLOR};
-        color: white;
-        border-radius: 5px;
-        width: 100%;
-    }}
-    </style>
-""",
-    unsafe_allow_html=True,
-)
-
-# URL de tu Web App de Google Apps Script (Conectada a tu Google Sheets)
+# URL DE GOOGLE APPS SCRIPT (Conectado a tu Google Sheets)
 WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxe-Uz2ZLGYTqP0gH0ByMOIWyrr3LAmKetdZVNyx_xC7sA-H4wtLLGk6l1izJsy_Sswew/exec"
 
 
-@st.cache_data(ttl=2)
-def cargar_datos_sheets():
-    try:
-        response = requests.get(WEBHOOK_URL)
-        if response.status_code == 200:
-            data = response.json()
-            if data:
-                return pd.DataFrame(data)
-        return pd.DataFrame(
-            columns=[
-                "id",
-                "fecha_asignacion",
-                "cliente",
-                "direccion",
-                "telefono",
-                "estatus_entrega",
-                "motivo",
-                "comentarios",
-                "fecha_actualizacion",
-            ]
-        )
-    except Exception:
-        return pd.DataFrame(
-            columns=[
-                "id",
-                "fecha_asignacion",
-                "cliente",
-                "direccion",
-                "telefono",
-                "estatus_entrega",
-                "motivo",
-                "comentarios",
-                "fecha_actualizacion",
-            ]
-        )
+# --- FUNCIONES DE CONEXIÓN CON GOOGLE SHEETS ---
+def cargar_datos_gsheets():
+  try:
+    response = requests.get(WEBHOOK_URL)
+    if response.status_code == 200:
+      data = response.json()
+      if data:
+        df = pd.DataFrame(data)
+        columnas_requeridas = [
+            "id",
+            "fecha_asignacion",
+            "cliente",
+            "direccion",
+            "telefono",
+            "estatus_entrega",
+            "motivo",
+            "comentarios",
+            "fecha_actualizacion",
+        ]
+        for col in columnas_requeridas:
+          if col not in df.columns:
+            df[col] = ""
+        return df
+  except Exception as e:
+    st.error(f"Error al conectar con Google Sheets: {e}")
+
+  # Retornar DataFrame vacío con estructura si falla
+  return pd.DataFrame(
+      columns=[
+          "id",
+          "fecha_asignacion",
+          "cliente",
+          "direccion",
+          "telefono",
+          "estatus_entrega",
+          "motivo",
+          "comentarios",
+          "fecha_actualizacion",
+      ]
+  )
 
 
-def guardar_datos_sheets(df):
-    try:
-        data_dict = df.to_dict(orient="records")
-        requests.post(WEBHOOK_URL, json=data_dict)
-    except Exception:
-        pass
+def guardar_fila_gsheets(fila_dict):
+  try:
+    response = requests.post(WEBHOOK_URL, json=fila_dict)
+    return response.status_code == 200
+  except Exception:
+    return False
 
 
-df = cargar_datos_sheets()
+# --- GESTIÓN DE USUARIOS Y PERFILES ---
+USUARIOS = {
+    "admin": {"password": "master2026", "rol": "Admin Máster"},
+    "oficina1": {"password": "sonamex2026", "rol": "Admin 1"},
+    "repartor1": {"password": "ruta123", "rol": "Entregas"},
+}
 
-# Control de Sesión de Usuario (Usuarios y Contraseñas Actualizados)
 if "autenticado" not in st.session_state:
-    st.session_state.autenticado = False
-    st.session_state.usuario = ""
-    st.session_state.rol = ""
+  st.session_state.autenticado = False
+  st.session_state.usuario = ""
+  st.session_state.rol = ""
 
 if not st.session_state.autenticado:
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        try:
-            st.image("logo_sonamex.png", width=220)
-        except Exception:
-            pass
-        st.markdown(
-            '<div class="main-header">🔐 Iniciar Sesión - SONAMEX</div>',
-            unsafe_allow_html=True,
-        )
+  st.markdown(
+      "<h2 style='text-align: center;'>📦 Control de Entregas Sonamex</h2>",
+      unsafe_allow_html=True,
+  )
+  st.markdown(
+      "<p style='text-align: center;'>Inicia sesión para acceder al"
+      " sistema</p>",
+      unsafe_allow_html=True,
+  )
 
-        with st.form("login_form"):
-            user_input = st.text_input("Usuario")
-            pass_input = st.text_input("Contraseña", type="password")
-            submit_login = st.form_submit_button("Entrar al Sistema")
+  col1, col2, col3 = st.columns([1, 2, 1])
+  with col2:
+    with st.form("login_form"):
+      usuario_input = st.text_input("Usuario")
+      password_input = st.text_input("Contraseña", type="password")
+      submit_login = st.form_submit_button("Entrar")
 
-            if submit_login:
-                # Diccionario centralizado de usuarios y contraseñas válidos
-                usuarios_validos = {
-                    "admin": {
-                        "pass": "master2026",
-                        "rol": "Oficina",
-                        "nombre": "Admin Máster",
-                    },
-                    "oficina1": {
-                        "pass": "sonamex2026",
-                        "rol": "Oficina",
-                        "nombre": "Admin 1",
-                    },
-                    "repartor1": {
-                        "pass": "ruta123",
-                        "rol": "Campo",
-                        "nombre": "Personal de Entregas",
-                    },
-                }
+      if submit_login:
+        if (
+            usuario_input in USUARIOS
+            and USUARIOS[usuario_input]["password"] == password_input
+        ):
+          st.session_state.autenticado = True
+          st.session_state.usuario = usuario_input
+          st.session_state.rol = USUARIOS[usuario_input]["rol"]
+          st.rerun()
+        else:
+          st.error("Usuario o contraseña incorrectos")
+  st.stop()
 
-                if (
-                    user_input in usuarios_validos
-                    and usuarios_validos[user_input]["pass"] == pass_input
-                ):
-                    st.session_state.autenticado = True
-                    st.session_state.usuario = usuarios_validos[user_input][
-                        "nombre"
-                    ]
-                    st.session_state.rol = usuarios_validos[user_input]["rol"]
-                    st.success("¡Bienvenido! Cargando sistema...")
-                    st.rerun()
-                else:
-                    st.error("Usuario o contraseña incorrectos.")
-    st.stop()
-
-# --- SESIÓN ACTIVA ---
-try:
-    st.sidebar.image("logo_sonamex.png", width=180)
-except Exception:
-    st.sidebar.markdown("### SONAMEX")
-
-st.sidebar.markdown(f"👤 **Usuario:** {st.session_state.usuario}")
-st.sidebar.markdown(f"🏷️ **Perfil:** {st.session_state.rol}")
-
-if st.sidebar.button("Cerrar Sesión"):
-    st.session_state.autenticado = False
-    st.rerun()
-
-st.markdown(
-    '<div class="main-header">📦 Sistema de Control y Medición de Entregas - SONAMEX</div>',
-    unsafe_allow_html=True,
+# --- INTERFAZ PRINCIPAL (UNA VEZ AUTENTICADO) ---
+st.sidebar.title("📦 Menú Sonamex")
+st.sidebar.write(
+    f"Usuario: **{st.session_state.usuario}** ({st.session_state.rol})"
 )
 
-if st.session_state.rol == "Oficina":
-    menu = st.sidebar.selectbox(
-        "Selecciona el Módulo",
-        ["1. Oficina (Alta de Envíos)", "2. Campo (Repartidores)", "3. Reportes"],
-    )
+if st.sidebar.button("Cerrar Sesión"):
+  st.session_state.autenticado = False
+  st.session_state.usuario = ""
+  st.session_state.rol = ""
+  st.rerun()
+
+# Definir opciones de menú según el rol
+if st.session_state.rol in ["Admin Máster", "Admin 1"]:
+  menu = st.sidebar.radio(
+      "Navegación",
+      [
+          "1. Oficina (Alta de Envíos)",
+          "2. Campo (Estatus de Entregas)",
+          "3. Reportes y Exportables",
+      ],
+  )
 else:
-    menu = "2. Campo (Repartidores)"
-    st.sidebar.info(
-        "Modo Entregas activo: Solo visualizas el módulo de campo."
-    )
+  menu = "2. Campo (Estatus de Entregas)"
+  st.sidebar.info(
+      "Modo Repartidor: Visualizando únicamente los envíos pendientes del"
+      " día."
+  )
 
-# ==========================================
-# MÓDULO 1: OFICINA
-# ==========================================
+# Cargar datos desde Google Sheets en tiempo real
+df_entregas = cargar_datos_gsheets()
+
+# --- MÓDULO 1: OFICINA (ALTA DE ENVÍOS) ---
 if menu == "1. Oficina (Alta de Envíos)":
-    st.subheader("🏢 Módulo de Atención a Clientes / Oficina")
-    st.write(
-        "Ingresa los datos del cliente y la dirección para enviar a ruta."
+  st.title("🏢 Oficina - Alta de Nuevos Envíos")
+  st.write(
+      "Registra los datos del cliente para que aparezcan automáticamente en"
+      " campo."
+  )
+
+  with st.form("form_alta", clear_on_submit=True):
+    cliente = st.text_input("Nombre del Cliente")
+    direccion = st.text_area("Dirección")
+    telefono = st.text_input("Teléfono")
+    fecha_asig = st.date_input(
+        "Fecha de Asignación / Entrega", datetime.date.today()
     )
 
-    with st.form("form_alta"):
-        col1, col2 = st.columns(2)
-        with col1:
-            cliente = st.text_input("Nombre del Cliente")
-            telefono = st.text_input("Teléfono de Contacto")
-        with col2:
-            fecha_asig = st.date_input(
-                "Fecha programada", value=datetime.today()
-            )
-            direccion = st.text_area("Dirección Completa")
-
-        submit_alta = st.form_submit_button("Registrar Envío para Ruta")
-
-        if submit_alta:
-            if cliente and direccion:
-                nuevo_id = int(len(df) + 1)
-                nuevo_registro = pd.DataFrame(
-                    [
-                        {
-                            "id": nuevo_id,
-                            "fecha_asignacion": str(fecha_asig),
-                            "cliente": cliente,
-                            "direccion": direccion,
-                            "telefono": str(telefono),
-                            "estatus_entrega": "Pendiente",
-                            "motivo": "",
-                            "comentarios": "",
-                            "fecha_actualizacion": "",
-                        }
-                    ]
-                )
-
-                df_updated = pd.concat([df, nuevo_registro], ignore_index=True)
-                guardar_datos_sheets(df_updated)
-                st.cache_data.clear()
-                st.success(
-                    f"¡Envío para el cliente '{cliente}' registrado y guardado en Google Sheets con éxito!"
-                )
-                st.rerun()
-            else:
-                st.error("Por favor completa al menos el nombre y la dirección.")
-
-    st.markdown("---")
-    st.subheader("📋 Envíos Actuales en Sistema (Google Sheets)")
-    if not df.empty:
-        st.dataframe(df, use_container_width=True)
-    else:
-        st.info("No hay envíos registrados todavía.")
-
-# ==========================================
-# MÓDULO 2: CAMPO (Repartidores - Con Opción Reprogramado)
-# ==========================================
-elif menu == "2. Campo (Repartidores)":
-    st.subheader("📱 Módulo de Reparto en Campo")
-    st.write("Selecciona la entrega pendiente para actualizar su estatus.")
-
-    if df.empty or len(df[df["estatus_entrega"] == "Pendiente"]) == 0:
-        st.info("No hay entregas pendientes por actualizar en este momento.")
-    else:
-        pendientes = df[df["estatus_entrega"] == "Pendiente"]
-        cliente_seleccionado = st.selectbox(
-            "Selecciona el Cliente a actualizar:",
-            options=pendientes["cliente"].tolist(),
+    submitted = st.form_submit_button("Registrar Envío")
+    if submitted:
+      if cliente and direccion:
+        nuevo_id = (
+            str(int(df_entregas["id"].astype(int).max() + 1))
+            if not df_entregas.empty and df_entregas["id"].astype(str).any()
+            else "1"
         )
+        nuevo_registro = {
+            "id": nuevo_id,
+            "fecha_asignacion": str(fecha_asig),
+            "cliente": cliente,
+            "direccion": direccion,
+            "telefono": telefono,
+            "estatus_entrega": "Pendiente",
+            "motivo": "",
+            "comentarios": "",
+            "fecha_actualizacion": str(datetime.datetime.now()),
+        }
 
-        registro_idx = df[df["cliente"] == cliente_seleccionado].index[0]
-        row = df.loc[registro_idx]
+        if guardar_fila_gsheets(nuevo_registro):
+          st.success(
+              "¡Envío registrado con éxito y sincronizado con Google Sheets!"
+          )
+        else:
+          st.error("Error al guardar en Google Sheets.")
+      else:
+        st.warning("Por favor completa al menos el cliente y la dirección.")
 
-        st.markdown(f"**Dirección:** {row['direccion']}")
-        st.markdown(f"**Teléfono:** {row['telefono']}")
-
-        with st.form("form_campo"):
-            estatus = st.radio(
-                "¿Cuál es el estatus de la entrega?",
-                ["Entregado con éxito", "No se entregó", "Reprogramado"],
-            )
-
-            motivo = ""
-            if estatus == "No se entregó":
-                motivo = st.selectbox(
-                    "Motivo de no entrega",
-                    [
-                        "Cliente ausente",
-                        "Negocio cerrado",
-                        "Dirección incorrecta",
-                        "Otro",
-                    ],
-                )
-            elif estatus == "Reprogramado":
-                nueva_fecha = st.date_input(
-                    "Nueva fecha programada para entrega"
-                )
-                motivo = f"Reprogramado para el {nueva_fecha}"
-
-            comentarios = st.text_area(
-                "Comentarios adicionales (Ej. Pide entregar por la tarde, etc.)"
-            )
-            submit_campo = st.form_submit_button("Guardar Estatus de Entrega")
-
-            if submit_campo:
-                df.at[registro_idx, "estatus_entrega"] = estatus
-                df.at[registro_idx, "motivo"] = motivo
-                df.at[registro_idx, "comentarios"] = comentarios
-                df.at[registro_idx, "fecha_actualizacion"] = str(
-                    datetime.now()
-                )
-
-                guardar_datos_sheets(df)
-                st.cache_data.clear()
-                st.success(
-                    "¡Estatus de entrega actualizado y guardado en Google Sheets!"
-                )
-                st.rerun()
-
-# ==========================================
-# MÓDULO 3: REPORTES
-# ==========================================
-elif menu == "3. Reportes":
-    st.subheader("📊 Módulo de Reportería y Exportación por Fechas")
-    st.write(
-        "Elige el rango de fechas directamente en los calendarios para extraer el reporte:"
+  st.subheader("📋 Envíos Registrados Recientemente")
+  if not df_entregas.empty:
+    st.dataframe(
+        df_entregas[
+            [
+                "id",
+                "fecha_asignacion",
+                "cliente",
+                "direccion",
+                "telefono",
+                "estatus_entrega",
+            ]
+        ],
+        use_container_width=True,
     )
+  else:
+    st.info("No hay envíos registrados todavía.")
 
-    if df.empty:
-        st.warning(
-            "No hay datos registrados en el sistema para generar reportes."
-        )
+# --- MÓDULO 2: CAMPO (ESTATUS DE ENTREGAS) ---
+elif menu == "2. Campo (Estatus de Entregas)":
+  st.title("📱 Módulo de Campo - Actualización de Entregas")
+
+  if df_entregas.empty:
+    st.info("No hay entregas registradas en el sistema.")
+  else:
+    # FILTRO PARA REPARTIDOR: Solo mostrar pendientes del día actual
+    if st.session_state.rol == "Entregas":
+      hoy_str = str(datetime.date.today())
+      df_filtrado = df_entregas[
+          (df_entregas["estatus_entrega"] == "Pendiente")
+          & (df_entregas["fecha_asignacion"] == hoy_str)
+      ]
+      st.write(
+          f"Mostrando envíos **Pendientes** programados para hoy (**{hoy_str}**):"
+      )
     else:
-        col_f1, col_f2 = st.columns(2)
-        with col_f1:
-            f_inicio = st.date_input(
-                "📅 Fecha Inicial del Reporte", value=datetime.today()
-            )
-        with col_f2:
-            f_fin = st.date_input(
-                "📅 Fecha Final del Reporte", value=datetime.today()
-            )
+      df_filtrado = df_entregas  # Administradores ven todo para revisión si lo desean
 
-        df["fecha_dt"] = pd.to_datetime(
-            df["fecha_asignacion"]
-        ).dt.date
-        df_filtrado = df[
-            (df["fecha_dt"] >= f_inicio) & (df["fecha_dt"] <= f_fin)
-        ].drop(columns=["fecha_dt"])
+    if df_filtrado.empty:
+      st.success(
+          "¡Excelente trabajo! No hay entregas pendientes asignadas para el día"
+          " de hoy."
+      )
+    else:
+      # Crear lista desplegable legible
+      opciones_envios = df_filtrado.apply(
+          lambda row: (
+              f"ID: {row['id']} | Cliente: {row['cliente']} | Dir:"
+              f" {row['direccion']}"
+          ),
+          axis=1,
+      )
+      envio_seleccionado = st.selectbox(
+          "Selecciona el envío a actualizar:", opciones_envios
+      )
+
+      if envio_seleccionado:
+        id_sel = envio_seleccionado.split("|")[0].replace("ID:", "").strip()
+        fila_actual = df_entregas[df_entregas["id"].astype(str) == id_sel].iloc[
+            0
+        ]
 
         st.info(
-            f"Se encontraron **{len(df_filtrado)}** registros entre el {f_inicio} y el {f_fin}."
+            f"**Cliente:** {fila_actual['cliente']} \n\n**Dirección:**"
+            f" {fila_actual['direccion']} \n\n**Teléfono:**"
+            f" {fila_actual['telefono']}"
         )
 
-        tipo_exportacion = st.radio(
-            "Selecciona el formato de exportación:", ["Excel (.xlsx)", "PDF"]
+        with st.form("form_campo"):
+          nuevo_estatus = st.selectbox(
+              "Estatus de la Entrega",
+              [
+                  "Pendiente",
+                  "Entregado con éxito",
+                  "No entregado",
+                  "Reprogramado",
+              ],
+          )
+          motivo = st.text_input(
+              "Motivo (Opcional, ej. cliente ausente, dirección incorrecta)"
+          )
+          comentarios = st.text_area(
+              "Comentarios (Ej. Pide entregar por la tarde, regreso a las 3 pm)"
+          )
+          nueva_fecha_reprog = st.date_input(
+              "Nueva Fecha (Solo si fue Reprogramado)", datetime.date.today()
+          )
+
+          submit_campo = st.form_submit_button("Guardar Actualización")
+
+          if submit_campo:
+            # Actualizar valores en el diccionario
+            fila_actual["estatus_entrega"] = nuevo_estatus
+            fila_actual["motivo"] = motivo
+            if nuevo_estatus == "Reprogramado":
+              fila_actual["comentarios"] = (
+                  f"Reprogramado para {nueva_fecha_reprog}. " + comentarios
+              )
+              fila_actual["fecha_asignacion"] = str(
+                  nueva_fecha_reprog
+              )  # Actualiza fecha para la nueva ruta
+              fila_actual["estatus_entrega"] = (
+                  "Pendiente"  # Regresa a pendiente para el nuevo día
+              )
+            else:
+              fila_actual["comentarios"] = comentarios
+
+            fila_actual["fecha_actualizacion"] = str(datetime.datetime.now())
+
+            # Guardar cambios enviando toda la fila a Google Sheets
+            if guardar_fila_gsheets(fila_actual.to_dict()):
+              st.success(
+                  "¡Estatus actualizado correctamente en Google Sheets!"
+              )
+              st.rerun()
+            else:
+              st.error("Error al actualizar los datos en la nube.")
+
+# --- MÓDULO 3: REPORTES Y EXPORTABLES ---
+elif menu == "3. Reportes y Exportables":
+  st.title("📊 Reportes y Exportación")
+  st.write(
+      "Selecciona un rango de fechas para extraer la reporteria oficial de"
+      " Sonamex."
+  )
+
+  if df_entregas.empty:
+    st.info("No hay datos para generar reportes.")
+  else:
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+      fecha_inicio = st.date_input(
+          "Fecha Inicio", datetime.date.today() - datetime.timedelta(days=7)
+      )
+    with col_f2:
+      fecha_fin = st.date_input("Fecha Fin", datetime.date.today())
+
+    # Filtrar por fechas
+    df_entregas["fecha_asignacion_dt"] = pd.to_datetime(
+        df_entregas["fecha_asignacion"], errors="coerce"
+    ).dt.date
+    df_reporte = df_entregas[
+        (df_entregas["fecha_asignacion_dt"] >= fecha_inicio)
+        & (df_entregas["fecha_asignacion_dt"] <= fecha_fin)
+    ]
+
+    st.write(
+        f"Se encontraron **{len(df_reporte)}** registros en el periodo"
+        " seleccionado."
+    )
+    st.dataframe(df_reporte, use_container_width=True)
+
+    # Botones de exportación
+    col_b1, col_b2 = st.columns(2)
+
+    with col_b1:
+      if not df_reporte.empty:
+        import io
+
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+          df_reporte.drop(columns=["fecha_asignacion_dt"], errors="ignore").to_excel(
+              writer, index=False, sheet_name="Reporte Entregas"
+          )
+        excel_data = output.getvalue()
+
+        st.download_button(
+            label="📥 Descargar Reporte en Excel (.xlsx)",
+            data=excel_data,
+            file_name=f"reporte_entregas_{fecha_inicio}_al_{fecha_fin}.xlsx",
+            mime=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
         )
 
-        if tipo_exportacion == "Excel (.xlsx)":
-            if st.button("📥 Generar y Descargar Reporte en EXCEL"):
-                output = io.BytesIO()
-                wb = openpyxl.Workbook()
-                ws = wb.active
-                ws.title = "Reporte de Entregas"
+    with col_b2:
+      if not df_reporte.empty:
 
-                try:
-                    img = OpenpyxlImage("logo_sonamex.png")
-                    img.width = 140
-                    img.height = 45
-                    ws.add_image(img, "B2")
-                except Exception:
-                    pass
+        def generar_pdf(df):
+          pdf = FPDF()
+          pdf.add_page()
+          pdf.set_font("Arial", "B", 14)
+          pdf.cell(
+              0,
+              10,
+              "Reporte de Entregas - Sonamex",
+              0,
+              1,
+              "C",
+          )
+          pdf.set_font("Arial", "", 10)
+          pdf.cell(
+              0,
+              10,
+              f"Periodo: {fecha_inicio} a {fecha_fin}",
+              0,
+              1,
+              "C",
+          )
+          pdf.ln(5)
 
-                header_fill = PatternFill(
-                    start_color="00512D", end_color="00512D", fill_type="solid"
-                )
-                header_font = Font(
-                    name="Calibri", size=11, bold=True, color="FFFFFF"
-                )
-                border_thin = Border(
-                    left=Side(style="thin", color="CCCCCC"),
-                    right=Side(style="thin", color="CCCCCC"),
-                    top=Side(style="thin", color="CCCCCC"),
-                    bottom=Side(style="thin", color="CCCCCC"),
-                )
+          pdf.set_font("Arial", "B", 8)
+          pdf.cell(15, 8, "ID", 1)
+          pdf.cell(35, 8, "Fecha", 1)
+          pdf.cell(50, 8, "Cliente", 1)
+          pdf.cell(50, 8, "Estatus", 1)
+          pdf.ln()
 
-                ws.append([])
-                ws.append([])
-                ws.append([])
-                ws.append(["REPORTE DE ENTREGAS - SONAMEX S.A. DE C.V."])
-                ws.append(
-                    [
-                        f"Período: {f_inicio} al {f_fin} | Emitido: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-                    ]
-                )
-                ws.append([])
+          pdf.set_font("Arial", "", 8)
+          for _, row in df.iterrows():
+            pdf.cell(15, 8, str(row["id"]), 1)
+            pdf.cell(35, 8, str(row["fecha_asignacion"]), 1)
+            pdf.cell(50, 8, str(row["cliente"])[:22], 1)
+            pdf.cell(50, 8, str(row["estatus_entrega"]), 1)
+            pdf.ln()
+          return pdf.output(dest="S").encode("latin1")
 
-                headers = [
-                    "ID",
-                    "Fecha Asignación",
-                    "Cliente",
-                    "Dirección",
-                    "Teléfono",
-                    "Estatus",
-                    "Motivo",
-                    "Comentarios",
-                    "Última Actualización",
-                ]
-                ws.append(headers)
-
-                header_row_idx = ws.max_row
-                for col_num in range(1, len(headers) + 1):
-                    cell = ws.cell(row=header_row_idx, column=col_num)
-                    cell.fill = header_fill
-                    cell.font = header_font
-                    cell.alignment = Alignment(
-                        horizontal="center", vertical="center"
-                    )
-
-                for row_idx, row in df_filtrado.iterrows():
-                    ws.append(list(row))
-                    current_row = ws.max_row
-                    for col_num in range(1, len(headers) + 1):
-                        cell = ws.cell(row=current_row, column=col_num)
-                        cell.border = border_thin
-                        cell.alignment = Alignment(
-                            horizontal="left", vertical="center"
-                        )
-
-                for col in ws.columns:
-                    max_len = max(len(str(cell.value or "")) for cell in col)
-                    col_letter = get_column_letter(col[0].column)
-                    ws.column_dimensions[col_letter].width = max(
-                        max_len + 3, 12
-                    )
-
-                wb.save(output)
-                processed_data = output.getvalue()
-
-                st.download_button(
-                    label="⬇️ Descargar Archivo Excel (.xlsx)",
-                    data=processed_data,
-                    file_name=f"Reporte_Entregas_{f_inicio}_al_{f_fin}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
-                st.success("¡Reporte en Excel generado con éxito!")
-
-        else:
-            if st.button("📥 Generar y Descargar Reporte en PDF"):
-                pdf = FPDF(orientation="L", unit="mm", format="A4")
-                pdf.add_page()
-
-                pdf.set_fill_color(0, 81, 45)
-                pdf.rect(0, 0, 297, 20, "F")
-
-                pdf.set_font("Arial", "B", 14)
-                pdf.set_text_color(255, 255, 255)
-                pdf.set_xy(10, 5)
-                pdf.cell(
-                    0,
-                    10,
-                    "REPORTE DE ENTREGAS - SONAMEX S.A. DE C.V.",
-                    0,
-                    1,
-                    "L",
-                )
-
-                pdf.set_font("Arial", "", 10)
-                pdf.set_text_color(50, 50, 50)
-                pdf.set_xy(10, 25)
-                pdf.cell(
-                    0,
-                    10,
-                    f"Rango de Fechas: {f_inicio} al {f_fin} | Emitido: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-                    0,
-                    1,
-                    "L",
-                )
-
-                pdf.ln(5)
-
-                pdf.set_font("Arial", "B", 8)
-                pdf.set_fill_color(230, 235, 230)
-                headers = [
-                    "ID",
-                    "Fecha",
-                    "Cliente",
-                    "Dirección",
-                    "Teléfono",
-                    "Estatus",
-                    "Motivo",
-                    "Comentarios",
-                ]
-                col_widths = [10, 22, 45, 75, 25, 30, 30, 40]
-
-                for i, header in enumerate(headers):
-                    pdf.cell(
-                        col_widths[i], 8, header, 1, 0, "C", fill=True
-                    )
-                pdf.ln()
-
-                pdf.set_font("Arial", "", 7)
-                for _, row in df_filtrado.iterrows():
-                    pdf.cell(col_widths[0], 7, str(row["id"]), 1, 0, "C")
-                    pdf.cell(
-                        col_widths[1], 7, str(row["fecha_asignacion"]), 1, 0, "C"
-                    )
-                    pdf.cell(
-                        col_widths[2],
-                        7,
-                        str(row["cliente"])[:25],
-                        1,
-                        0,
-                        "L",
-                    )
-                    pdf.cell(
-                        col_widths[3],
-                        7,
-                        str(row["direccion"])[:45],
-                        1,
-                        0,
-                        "L",
-                    )
-                    pdf.cell(
-                        col_widths[4], 7, str(row["telefono"]), 1, 0, "C"
-                    )
-                    pdf.cell(
-                        col_widths[5],
-                        7,
-                        str(row["estatus_entrega"]),
-                        1,
-                        0,
-                        "C",
-                    )
-                    pdf.cell(col_widths[6], 7, str(row["motivo"])[:18], 1, 0, "L")
-                    pdf.cell(
-                        col_widths[7],
-                        7,
-                        str(row["comentarios"])[:25],
-                        1,
-                        0,
-                        "L",
-                    )
-                    pdf.ln()
-
-                pdf_output = bytes(pdf.output())
-
-                st.download_button(
-                    label="⬇️ Descargar Archivo PDF",
-                    data=pdf_output,
-                    file_name=f"Reporte_Entregas_{f_inicio}_al_{f_fin}.pdf",
-                    mime="application/pdf",
-                )
-                st.success("¡Reporte en PDF generado con éxito!")
+        pdf_data = generar_pdf(df_reporte)
+        st.download_button(
+            label="📥 Descargar Reporte en PDF",
+            data=pdf_data,
+            file_name=f"reporte_entregas_{fecha_inicio}_al_{fecha_fin}.pdf",
+            mime="application/pdf",
+        )
