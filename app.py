@@ -1,8 +1,10 @@
+import streamlit as pd_st # Solo para evitar conflicto de nombres con pandas
 import streamlit as st
 import pandas as pd
 import requests
 import json
 from datetime import datetime
+import io
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(
@@ -13,6 +15,10 @@ st.set_page_config(
 
 # URL DE TU GOOGLE SHEETS WEB APP
 WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyJoTXFLLcbDMOrZj6S-nUJdtinMXicGrYU19ze1CavCmbJuI1817VXbyB5SNjj8reR2A/exec"
+
+# RUTA DEL LOGOTIPO EN EL REPOSITORIO DE GITHUB
+# (Asegúrate de subir tu imagen con este nombre exacto a tu repositorio o cámbialo aquí)
+LOGO_PATH = "logo_sonamex.png"
 
 # --- ESTILOS VISUALES Y COLORES SONAMEX ---
 st.markdown("""
@@ -28,7 +34,6 @@ st.markdown("""
         background-color: #002244;
         color: white;
     }
-    .css-1104ytp { text-align: center; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -70,14 +75,19 @@ if "autenticado" not in st.session_state:
 if not st.session_state.autenticado:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown("<h2 style='text-align: center; color: #003366;'>SONAMEX - Control de Entregas</h2>", unsafe_allow_html=True)
-        st.markdown("<h4 style='text-align: center; color: gray;'>Inicie sesión con sus credenciales</h4>", unsafe_allow_html=True)
+        # Intentar mostrar el logo en la pantalla de login si existe
+        try:
+            st.image(LOGO_PATH, width=220)
+        except:
+            st.markdown("<h2 style='text-align: center; color: #003366;'>SONAMEX</h2>", unsafe_allow_html=True)
+            
+        st.markdown("<h3 style='text-align: center; color: #003366;'>Control de Entregas</h3>", unsafe_allow_html=True)
+        st.markdown("<h5 style='text-align: center; color: gray;'>Inicie sesión con sus credenciales</h5>", unsafe_allow_html=True)
         
         usuario_input = st.text_input("Usuario")
         password_input = st.text_input("Contraseña", type="password")
         
         if st.button("Ingresar al Sistema", use_container_width=True):
-            # Credenciales de acceso
             usuarios_validos = {
                 "admin": {"pass": "master2026", "rol": "Oficina"},
                 "oficina1": {"pass": "sonamex2026", "rol": "Oficina"},
@@ -93,8 +103,12 @@ if not st.session_state.autenticado:
                 st.error("Usuario o contraseña incorrectos")
     st.stop()
 
-# --- BARRA LATERAL (MENÚ Y SESIÓN) ---
-st.sidebar.title("📦 SONAMEX")
+# --- BARRA LATERAL CON LOGO Y SESIÓN ---
+try:
+    st.sidebar.image(LOGO_PATH, width=180)
+except:
+    st.sidebar.title("📦 SONAMEX")
+
 st.sidebar.write(f"**Usuario:** {st.session_state.usuario}")
 st.sidebar.write(f"**Rol:** {st.session_state.rol}")
 
@@ -160,13 +174,11 @@ if rol_actual == "Oficina":
                     
     elif menu == "2. Histórico y Reportes":
         st.title("📊 Oficina: Histórico General y Reportes")
-        st.write("Visualización total de envíos y filtrado por fechas para exportar.")
+        st.write("Visualización total de envíos y filtrado por fechas para exportar en Excel con formato corporativo.")
         
         if not df.empty and "fecha_asignacion" in df.columns:
-            # Filtro por rango de fechas
             st.subheader("Filtrar Reporte por Fecha de Asignación")
             
-            # Limpiar y convertir fechas para el filtro
             df['solo_fecha'] = pd.to_datetime(df['fecha_asignacion'], errors='coerce').dt.date
             
             col_f1, col_f2 = st.columns(2)
@@ -179,19 +191,35 @@ if rol_actual == "Oficina":
             
             st.dataframe(df_filtrado.drop(columns=['solo_fecha']), use_container_width=True)
             
-            # Botón de exportación a Excel con diseño
+            # Botón de exportación a Excel con diseño institucional Sonamex
             if not df_filtrado.empty:
-                import io
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    df_filtrado.drop(columns=['solo_fecha']).to_excel(writer, index=False, sheet_name='Entregas_Sonamex')
+                    df_limpio = df_filtrado.drop(columns=['solo_fecha'])
+                    df_limpio.to_excel(writer, index=False, sheet_name='Entregas_Sonamex')
+                    
+                    # Formato corporativo (Excel estético)
+                    workbook = writer.book
+                    worksheet = writer.sheets['Entregas_Sonamex']
+                    
+                    header_format = workbook.add_format({
+                        'bold': True,
+                        'text_wrap': True,
+                        'valign': 'top',
+                        'fg_color': '#003366',
+                        'font_color': '#FFFFFF',
+                        'border': 1
+                    })
+                    
+                    for col_num, value in enumerate(df_limpio.columns.values):
+                        worksheet.write(0, col_num, value, header_format)
                 
                 excel_data = output.getvalue()
                 
                 st.download_button(
-                    label="📥 Descargar Reporte en Excel (XLSX)",
+                    label="📥 Descargar Reporte en Excel (Sonamex)",
                     data=excel_data,
-                    file_name=f"Reporte_Entregas_{fecha_inicio}_al_{fecha_fin}.xlsx",
+                    file_name=f"Reporte_Entregas_Sonamex_{fecha_inicio}_al_{fecha_fin}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
         else:
@@ -204,7 +232,6 @@ elif rol_actual == "Campo":
     fecha_hoy_str = datetime.now().strftime("%Y-%m-%d")
     
     if not df.empty and "fecha_asignacion" in df.columns:
-        # Filtrar solo pendientes del día actual para el repartidor
         df['solo_fecha'] = pd.to_datetime(df['fecha_asignacion'], errors='coerce').dt.strftime("%Y-%m-%d")
         df_campo = df[(df['solo_fecha'] == fecha_hoy_str) & (df['estatus_entrega'] == "Pendiente")]
         
